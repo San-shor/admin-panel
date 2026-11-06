@@ -40,7 +40,21 @@ body {
 @keyframes spin { to { transform: rotate(360deg); } }
 .spin { animation: spin 0.7s linear infinite; }
 
+.print-sheet { display: none; }
+
 @media print {
   .no-print { display: none !important; }
   body { background: #fff; }
+  body * { visibility: hidden; }
+  .print-sheet, .print-sheet * { visibility: visible; }
+  .print-sheet {
+    display: block !important;
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    background: #fff;
+    color: #1c1917;
+  }
+  @page { margin: 14mm; }
 }

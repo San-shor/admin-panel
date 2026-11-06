@@ -28,8 +28,8 @@ export function StatusBadge({ s }: { s: Status }) {
   return <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ${STATUS_STYLE[s]}`}>{s}</span>;
 }
 
-export function Card({ className = "", children }: { className?: string; children: React.ReactNode }) {
-  return <div className={`rounded-xl border border-stone-200/80 bg-white shadow-[0_1px_2px_rgba(28,25,23,0.04)] ${className}`}>{children}</div>;
+export function Card({ className = "", children, id }: { className?: string; children: React.ReactNode; id?: string }) {
+  return <div id={id} className={`rounded-xl border border-stone-200/80 bg-white shadow-[0_1px_2px_rgba(28,25,23,0.04)] ${className}`}>{children}</div>;
 }
 
 export function PageTitle({ title, sub, right }: { title: string; sub?: string; right?: React.ReactNode }) {
@@ -40,6 +40,31 @@ export function PageTitle({ title, sub, right }: { title: string; sub?: string; 
         {sub && <p className="text-sm text-stone-500">{sub}</p>}
       </div>
       {right}
+    </div>
+  );
+}
+
+export const fieldClass =
+  "w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-indigo-100";
+
+export function Modal({ title, onClose, children, wide = false }: { title: string; onClose: () => void; children: React.ReactNode; wide?: boolean }) {
+  return (
+    <div className="no-print fixed inset-0 z-40 flex items-end justify-center bg-stone-900/40 sm:items-center sm:p-4" onClick={onClose}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className={`pop-in max-h-[92vh] w-full overflow-y-auto rounded-t-3xl bg-white p-5 shadow-2xl sm:rounded-3xl ${wide ? "max-w-lg" : "max-w-md"}`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <h2 className="text-lg font-semibold">{title}</h2>
+          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-full text-xl leading-none text-stone-400 hover:bg-stone-100" aria-label="Close">
+            ×
+          </button>
+        </div>
+        {children}
+      </div>
     </div>
   );
 }

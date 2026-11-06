@@ -1,27 +1,31 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowRight, Banknote, ClipboardList, Globe, MessageCircle, Store, TrendingUp, Truck, Wallet } from "lucide-react";
+import { ArrowRight, Banknote, CircleDollarSign, ClipboardList, Globe, MessageCircle, Store, TrendingUp, Truck } from "lucide-react";
 import { useShop } from "@/lib/store";
 import { Card, PageTitle, StatusBadge, Swatch } from "@/components/ui";
 import WeekChart from "@/components/WeekChart";
-import { EARLIER_POS_TODAY, LOW_STOCK, PAST_WEEK, SHOP, dueOnDelivery, orderTotal, taka, timeAgo, type Channel } from "@/lib/data";
+import { PAST_WEEK, dueOnDelivery, itemsCost, itemsTotal, orderTotal, taka, timeAgo, type Channel } from "@/lib/data";
 
 const CHANNEL_ICON = { "Facebook inbox": MessageCircle, Website: Globe, "Shop (POS)": Store } as const;
 
 export default function Dashboard() {
-  const { orders, products, sales, now } = useShop();
+  const { orders, products, sales, settings, now } = useShop();
   const live = orders.filter((o) => o.status !== "Returned");
-  const productSales = (list: typeof live) => list.reduce((a, o) => a + orderTotal(o, products) - o.delivery, 0);
+  const productSales = (list: typeof live) => list.reduce((a, o) => a + itemsTotal(o.items, products), 0);
 
-  const posTotal = EARLIER_POS_TODAY + sales.reduce((a, s) => a + s.total, 0);
+  const posTotal = sales.reduce((a, s) => a + s.total, 0);
   const todayTotal = productSales(live) + posTotal;
+  const cost = live.reduce((a, o) => a + itemsCost(o.items, products), 0) + sales.reduce((a, s) => a + itemsCost(s.items, products), 0);
+  const profit = todayTotal - cost;
+  const margin = todayTotal > 0 ? Math.round((profit / todayTotal) * 100) : 0;
   const yesterday = PAST_WEEK[PAST_WEEK.length - 1];
   const change = Math.round(((todayTotal - yesterday) / yesterday) * 100);
   const todo = orders.filter((o) => ["New", "Confirmed", "Packed"].includes(o.status));
   const shipped = orders.filter((o) => o.status === "Shipped");
   const codDue = shipped.reduce((a, o) => a + dueOnDelivery(o, products), 0);
-  const bkash = orders.reduce((a, o) => a + o.paid, 0) + sales.filter((s) => s.payment === "bKash").reduce((a, s) => a + s.total, 0);
+  const mobile = orders.reduce((a, o) => a + o.paid, 0) + sales.filter((s) => s.payment === "bKash" || s.payment === "Nagad").reduce((a, s) => a + s.total, 0);
+  const drawer = sales.filter((s) => s.payment === "Cash").reduce((a, s) => a + s.total, 0);
 
   const channels: { c: Channel; v: number }[] = [
     { c: "Facebook inbox", v: productSales(live.filter((o) => o.channel === "Facebook inbox")) },
@@ -31,12 +35,12 @@ export default function Dashboard() {
 
   const low = products
     .flatMap((p) => Object.entries(p.stock).map(([size, n]) => ({ p, size, n: n ?? 0 })))
-    .filter((x) => x.n <= LOW_STOCK)
+    .filter((x) => x.n <= settings.lowStock)
     .sort((a, b) => a.n - b.n);
 
   return (
     <div className="mx-auto max-w-6xl">
-      <PageTitle title="Dashboard" sub={`Here is how ${SHOP.name} is doing today.`} />
+      <PageTitle title="Dashboard" sub={`Today at ${settings.name}. Inbox, website and the counter, in one place.`} />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat icon={<TrendingUp size={18} />} label="Today's sales" value={taka(todayTotal)}>
@@ -48,8 +52,8 @@ export default function Dashboard() {
         <Stat icon={<Truck size={18} />} label="COD with courier" value={taka(codDue)}>
           {shipped.length} parcel{shipped.length === 1 ? "" : "s"} on the way
         </Stat>
-        <Stat icon={<Wallet size={18} />} label="bKash received" value={taka(bkash)}>
-          Advance + full payments
+        <Stat icon={<CircleDollarSign size={18} />} label="Gross profit" value={taka(profit)}>
+          {margin}% margin, before delivery charges
         </Stat>
       </div>
 
@@ -98,9 +102,15 @@ export default function Dashboard() {
               );
             })}
           </ul>
-          <div className="mt-5 flex items-center gap-2 rounded-lg bg-stone-50 p-3 text-xs text-stone-600">
-            <Banknote size={16} className="text-stone-400" />
-            Cash in drawer: <b className="tabular-nums">{taka(posTotal - sales.filter((s) => s.payment === "bKash").reduce((a, s) => a + s.total, 0))}</b>
+          <div className="mt-5 grid gap-2 rounded-lg bg-stone-50 p-3 text-xs text-stone-600">
+            <p className="flex items-center gap-2">
+              <Banknote size={16} className="text-stone-400" />
+              Cash in drawer <b className="ml-auto tabular-nums text-stone-800">{taka(drawer)}</b>
+            </p>
+            <p className="flex items-center gap-2">
+              <span className="grid h-4 w-4 place-items-center text-[10px] font-bold text-stone-400">৳</span>
+              bKash & Nagad <b className="ml-auto tabular-nums text-stone-800">{taka(mobile)}</b>
+            </p>
           </div>
         </Card>
       </div>

@@ -2,14 +2,12 @@
 
 import { useState } from "react";
 import { useShop } from "@/lib/store";
-import { Swatch } from "@/components/ui";
-import { CUSTOMER_HISTORY, DELIVERY, itemsTotal, taka, type Item, type Payment, type Size } from "@/lib/data";
-
-const input = "w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-indigo-100";
+import { Swatch, fieldClass } from "@/components/ui";
+import { CUSTOMER_HISTORY, itemsTotal, taka, type Item, type Payment, type Size } from "@/lib/data";
 
 /** Form for typing in an order that came by Facebook inbox or phone. */
 export default function NewOrder({ onClose }: { onClose: (id?: string) => void }) {
-  const { products, addOrder } = useShop();
+  const { products, addOrder, settings, notify } = useShop();
   const [customer, setCustomer] = useState("");
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
@@ -25,10 +23,10 @@ export default function NewOrder({ onClose }: { onClose: (id?: string) => void }
   const reserved = (pid: string, s: Size) => items.filter((i) => i.productId === pid && i.size === s).reduce((a, i) => a + i.qty, 0);
   const left = (s: Size) => (product.stock[s] ?? 0) - reserved(product.id, s);
 
-  const delivery = inside ? DELIVERY.inside : DELIVERY.outside;
+  const delivery = inside ? settings.deliveryInside : settings.deliveryOutside;
   const sub = itemsTotal(items, products);
   const total = sub + delivery;
-  const paid = payment === "bKash" ? total : Math.min(advance, total);
+  const paid = payment === "COD" ? Math.min(advance, total) : total;
   const hist = CUSTOMER_HISTORY[phone.trim()];
   const ok = customer.trim() && phone.trim() && address.trim() && items.length > 0;
 
@@ -44,6 +42,7 @@ export default function NewOrder({ onClose }: { onClose: (id?: string) => void }
   function save() {
     if (!ok) return;
     const id = addOrder({ customer: customer.trim(), phone: phone.trim(), address: address.trim(), insideDhaka: inside, channel: "Facebook inbox", payment, paid, items, delivery });
+    notify({ tone: "ok", title: `Order #${id} saved`, body: "Stock updated for the sizes in this order." });
     onClose(id);
   }
 
@@ -57,8 +56,8 @@ export default function NewOrder({ onClose }: { onClose: (id?: string) => void }
 
         <div className="grid gap-3">
           <div className="grid gap-3 sm:grid-cols-2">
-            <input className={input} placeholder="Customer name" value={customer} onChange={(e) => setCustomer(e.target.value)} />
-            <input className={input} placeholder="Phone (e.g. 01988-301776)" value={phone} onChange={(e) => setPhone(e.target.value)} />
+            <input className={fieldClass} placeholder="Customer name" value={customer} onChange={(e) => setCustomer(e.target.value)} />
+            <input className={fieldClass} placeholder="Phone (e.g. 01988-301776)" value={phone} onChange={(e) => setPhone(e.target.value)} />
           </div>
           {hist && (
             <p className={`rounded-xl p-2.5 text-xs ${hist.returned >= 2 ? "bg-rose-50 text-rose-800" : "bg-emerald-50 text-emerald-800"}`}>
@@ -67,12 +66,12 @@ export default function NewOrder({ onClose }: { onClose: (id?: string) => void }
                 : `✓ Regular customer: ${hist.orders} orders, no returns.`}
             </p>
           )}
-          <input className={input} placeholder="Full address" value={address} onChange={(e) => setAddress(e.target.value)} />
+          <input className={fieldClass} placeholder="Full address" value={address} onChange={(e) => setAddress(e.target.value)} />
 
           <div className="grid grid-cols-2 gap-2">
             {[true, false].map((v) => (
               <button key={String(v)} onClick={() => setInside(v)} className={`rounded-xl px-3 py-2 text-sm font-medium ring-1 ${inside === v ? "bg-indigo-50 text-brand ring-brand" : "ring-stone-200"}`}>
-                {v ? `Inside Dhaka ${taka(DELIVERY.inside)}` : `Outside Dhaka ${taka(DELIVERY.outside)}`}
+                {v ? `Inside Dhaka ${taka(settings.deliveryInside)}` : `Outside Dhaka ${taka(settings.deliveryOutside)}`}
               </button>
             ))}
           </div>
@@ -81,7 +80,7 @@ export default function NewOrder({ onClose }: { onClose: (id?: string) => void }
           <div className="rounded-2xl bg-stone-50 p-3">
             <div className="flex items-center gap-2">
               <Swatch p={product} size={38} />
-              <select className={input} value={pick} onChange={(e) => { setPick(e.target.value); setSize(""); }}>
+              <select className={fieldClass} value={pick} onChange={(e) => { setPick(e.target.value); setSize(""); }}>
                 {products.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name} · {taka(p.price)}
@@ -123,17 +122,17 @@ export default function NewOrder({ onClose }: { onClose: (id?: string) => void }
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
-            {(["COD", "bKash"] as Payment[]).map((p) => (
-              <button key={p} onClick={() => setPayment(p)} className={`rounded-xl px-3 py-2 text-sm font-medium ring-1 ${payment === p ? "bg-indigo-50 text-brand ring-brand" : "ring-stone-200"}`}>
-                {p === "COD" ? "Cash on delivery" : "Full bKash payment"}
+          <div className="grid grid-cols-3 gap-2">
+            {(["COD", "bKash", "Nagad"] as Payment[]).map((p) => (
+              <button key={p} onClick={() => setPayment(p)} className={`rounded-xl px-2 py-2 text-sm font-medium ring-1 ${payment === p ? "bg-indigo-50 text-brand ring-brand" : "ring-stone-200"}`}>
+                {p === "COD" ? "Cash on delivery" : p}
               </button>
             ))}
           </div>
           {payment === "COD" && (
             <label className="flex items-center gap-2 whitespace-nowrap text-sm text-stone-600">
-              bKash advance
-              <input type="number" min={0} className={`${input} w-28`} value={advance || ""} placeholder="0" onChange={(e) => setAdvance(Number(e.target.value) || 0)} />
+              Advance received
+              <input type="number" min={0} className={`${fieldClass} w-28`} value={advance || ""} placeholder="0" onChange={(e) => setAdvance(Number(e.target.value) || 0)} />
             </label>
           )}
 

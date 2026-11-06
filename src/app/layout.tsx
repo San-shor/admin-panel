@@ -18,7 +18,7 @@ const hind = Hind_Siliguri({
 export const metadata: Metadata = {
   title: "Dokan Panel: orders, stock and POS for Facebook shops",
   description:
-    "One panel for inbox orders, website orders and shop sales. COD and bKash tracking, size-wise stock, courier status and a POS. A demo by WebNest Studio.",
+    "One panel for inbox orders, website orders and shop sales. COD, bKash and Nagad, size-wise stock, customer history, profit and a counter POS. A demo by WebNest Studio.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

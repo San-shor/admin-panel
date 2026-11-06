@@ -3,20 +3,25 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import {
   COURIERS,
+  DEFAULT_SHOP,
   FLOW,
   INCOMING,
   PRODUCTS,
   seedOrders,
+  seedSales,
   itemsTotal,
   type Item,
   type Order,
   type Payment,
+  type PosSale,
   type Product,
+  type ShopSettings,
   type Status,
 } from "./data";
 
-export type PosSale = { id: string; at: number; items: Item[]; total: number; payment: Payment };
+export type { PosSale };
 export type Toast = { id: number; title: string; body: string; tone: "new" | "ok" | "warn" };
+export type Spotlight = { kind: "order" | "product" | "customer"; id: string };
 
 type State = {
   products: Product[];
@@ -24,28 +29,64 @@ type State = {
   sales: PosSale[];
   nextId: number;
   incoming: number;
+  settings: ShopSettings;
 };
 
 type NewOrder = Omit<Order, "id" | "createdAt" | "history" | "status">;
+export type NewProduct = Omit<Product, "id">;
 
 type Store = State & {
   now: number;
   toasts: Toast[];
+  spotlight: Spotlight | null;
   addOrder: (o: NewOrder) => string;
   advance: (id: string) => void;
   markReturned: (id: string) => void;
+  setCourier: (id: string, courier: string) => void;
   restock: (productId: string, size: string, n: number) => void;
-  sell: (items: Item[], payment: Payment) => PosSale;
+  addProduct: (p: NewProduct) => string;
+  updateProduct: (id: string, patch: Partial<Pick<Product, "name" | "price" | "cost">>) => void;
+  updateSettings: (patch: Partial<ShopSettings>) => void;
+  sell: (items: Item[], payment: Payment, discount: number, customer: string) => PosSale;
   simulateIncoming: () => void;
+  notify: (t: Omit<Toast, "id">) => void;
   dismiss: (id: number) => void;
+  focus: (s: Spotlight) => void;
+  clearFocus: () => void;
   reset: () => void;
 };
 
-const KEY = "dokan-panel-v1";
+const KEY = "dokan-panel-v2";
 const Ctx = createContext<Store | null>(null);
 
 function fresh(): State {
-  return { products: structuredClone(PRODUCTS), orders: seedOrders(Date.now()), sales: [], nextId: 1049, incoming: 0 };
+  const now = Date.now();
+  return {
+    products: structuredClone(PRODUCTS),
+    orders: seedOrders(now),
+    sales: seedSales(now),
+    nextId: 1049,
+    incoming: 0,
+    settings: structuredClone(DEFAULT_SHOP),
+  };
+}
+
+function hydrate(raw: string | null): State {
+  if (!raw) return fresh();
+  try {
+    const s = JSON.parse(raw);
+    if (!s || !Array.isArray(s.products) || !Array.isArray(s.orders) || typeof s.settings?.name !== "string") return fresh();
+    return {
+      products: s.products,
+      orders: s.orders,
+      sales: Array.isArray(s.sales) ? s.sales : [],
+      nextId: typeof s.nextId === "number" ? s.nextId : 1049,
+      incoming: typeof s.incoming === "number" ? s.incoming : 0,
+      settings: { ...DEFAULT_SHOP, ...s.settings },
+    };
+  } catch {
+    return fresh();
+  }
 }
 
 function changeStock(products: Product[], items: Item[], sign: 1 | -1): Product[] {
@@ -62,16 +103,16 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<State | null>(null);
   const [now, setNow] = useState(0);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [spotlight, setSpotlight] = useState<Spotlight | null>(null);
 
   // Load saved demo state in the browser only (so server and client HTML match).
   useEffect(() => {
-    let s: State | null = null;
+    let raw: string | null = null;
     try {
-      const raw = localStorage.getItem(KEY);
-      if (raw) s = JSON.parse(raw);
+      raw = localStorage.getItem(KEY);
     } catch {}
     // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time load from localStorage
-    setState(s ?? fresh());
+    setState(hydrate(raw));
     setNow(Date.now());
     const t = setInterval(() => setNow(Date.now()), 20_000);
     return () => clearInterval(t);
@@ -84,7 +125,7 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
     } catch {}
   }, [state]);
 
-  const toast = useCallback((t: Omit<Toast, "id">) => {
+  const notify = useCallback((t: Omit<Toast, "id">) => {
     const id = Date.now() + Math.random();
     setToasts((ts) => [...ts, { ...t, id }]);
     setTimeout(() => setToasts((ts) => ts.filter((x) => x.id !== id)), 5000);
@@ -140,20 +181,63 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
     [update],
   );
 
+  const setCourier = useCallback(
+    (id: string, courier: string) => update((s) => ({ ...s, orders: s.orders.map((o) => (o.id === id ? { ...o, courier } : o)) })),
+    [update],
+  );
+
   const restock = useCallback(
     (productId: string, size: string, n: number) =>
       update((s) => ({ ...s, products: changeStock(s.products, [{ productId, size: size as Item["size"], qty: n }], 1) })),
     [update],
   );
 
+  const addProduct = useCallback(
+    (p: NewProduct) => {
+      const id = `p${Date.now().toString().slice(-7)}`;
+      update((s) => ({ ...s, products: [...s.products, { ...p, id }] }));
+      return id;
+    },
+    [update],
+  );
+
+  const updateProduct = useCallback(
+    (id: string, patch: Partial<Pick<Product, "name" | "price" | "cost">>) =>
+      update((s) => ({
+        ...s,
+        products: s.products.map((p) =>
+          p.id === id
+            ? {
+                ...p,
+                ...patch,
+                price: patch.price === undefined ? p.price : Math.max(0, Math.round(patch.price)),
+                cost: patch.cost === undefined ? p.cost : Math.max(0, Math.round(patch.cost)),
+              }
+            : p,
+        ),
+      })),
+    [update],
+  );
+
+  const updateSettings = useCallback(
+    (patch: Partial<ShopSettings>) => update((s) => ({ ...s, settings: { ...s.settings, ...patch } })),
+    [update],
+  );
+
   const sell = useCallback(
-    (items: Item[], payment: Payment) => {
+    (items: Item[], payment: Payment, discount: number, customer: string) => {
+      const products = state?.products ?? PRODUCTS;
+      const subtotal = itemsTotal(items, products);
+      const off = Math.min(Math.max(0, Math.round(discount)), subtotal);
       const sale: PosSale = {
         id: `S-${Date.now().toString().slice(-5)}`,
         at: Date.now(),
         items,
         payment,
-        total: itemsTotal(items, state?.products ?? PRODUCTS),
+        customer: customer.trim() || "Walk-in",
+        subtotal,
+        discount: off,
+        total: subtotal - off,
       };
       update((s) => ({ ...s, products: changeStock(s.products, items, -1), sales: [sale, ...s.sales] }));
       return sale;
@@ -166,8 +250,11 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
     const o = INCOMING[state.incoming % INCOMING.length];
     const id = addOrder(o);
     update((s) => ({ ...s, incoming: s.incoming + 1 }));
-    toast({ tone: "new", title: `New order #${id}`, body: `${o.customer} · ${o.channel}` });
-  }, [state, addOrder, update, toast]);
+    notify({ tone: "new", title: `New order #${id}`, body: `${o.customer} · ${o.channel}` });
+  }, [state, addOrder, update, notify]);
+
+  const focus = useCallback((s: Spotlight) => setSpotlight(s), []);
+  const clearFocus = useCallback(() => setSpotlight(null), []);
 
   const value = useMemo<Store | null>(
     () =>
@@ -175,19 +262,28 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
         ...state,
         now,
         toasts,
+        spotlight,
         addOrder,
         advance,
         markReturned,
+        setCourier,
         restock,
+        addProduct,
+        updateProduct,
+        updateSettings,
         sell,
         simulateIncoming,
+        notify,
         dismiss: (id: number) => setToasts((ts) => ts.filter((x) => x.id !== id)),
+        focus,
+        clearFocus,
         reset: () => {
           setState(fresh());
           setNow(Date.now());
+          setSpotlight(null);
         },
       },
-    [state, now, toasts, addOrder, advance, markReturned, restock, sell, simulateIncoming],
+    [state, now, toasts, spotlight, addOrder, advance, markReturned, setCourier, restock, addProduct, updateProduct, updateSettings, sell, simulateIncoming, notify, focus, clearFocus],
   );
 
   if (!value) {

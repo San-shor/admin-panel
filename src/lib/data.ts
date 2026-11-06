@@ -1,9 +1,30 @@
 // Sample shop data for the demo. Everything here is made up.
+// Stock numbers are the shelf right now. Seed orders and counter sales are already reflected in them.
 
-export const SHOP = {
-  name: "Your Shop",
+export type ShopSettings = {
+  name: string;
+  tagline: string;
+  city: string;
+  phone: string;
+  address: string;
+  /** Shown on slips so the customer can send bKash or Nagad. */
+  bkash: string;
+  deliveryInside: number;
+  deliveryOutside: number;
+  /** A size at or below this count is flagged. */
+  lowStock: number;
+};
+
+export const DEFAULT_SHOP: ShopSettings = {
+  name: "Noor Boutique",
   tagline: "Kurti · Three-piece · Saree · Hijab",
   city: "Dhaka",
+  phone: "01611-204080",
+  address: "Shop 12, Level 3, Bashundhara City",
+  bkash: "01611-204080",
+  deliveryInside: 70,
+  deliveryOutside: 130,
+  lowStock: 2,
 };
 
 export const SIZES = ["M", "L", "XL"] as const;
@@ -23,7 +44,7 @@ export type Product = {
 };
 
 export type Channel = "Facebook inbox" | "Website" | "Shop (POS)";
-export type Payment = "COD" | "bKash" | "Cash";
+export type Payment = "COD" | "bKash" | "Nagad" | "Cash";
 export type Status = "New" | "Confirmed" | "Packed" | "Shipped" | "Delivered" | "Returned";
 
 export const FLOW: Status[] = ["New", "Confirmed", "Packed", "Shipped", "Delivered"];
@@ -49,8 +70,16 @@ export type Order = {
   history: Partial<Record<Status, number>>;
 };
 
-export const DELIVERY = { inside: 70, outside: 130 };
-export const LOW_STOCK = 2;
+export const PALETTES: [string, string][] = [
+  ["#0f766e", "#fde68a"],
+  ["#7c2d12", "#fdba74"],
+  ["#831843", "#f9a8d4"],
+  ["#b91c1c", "#fef3c7"],
+  ["#1e3a8a", "#fcd34d"],
+  ["#3f6212", "#d9f99d"],
+  ["#6b21a8", "#e9d5ff"],
+  ["#334155", "#cbd5e1"],
+];
 
 export const PRODUCTS: Product[] = [
   { id: "p1", name: "Block-print cotton kurti", category: "Kurti", price: 1250, cost: 720, colors: ["#0f766e", "#fde68a"], stock: { M: 4, L: 6, XL: 2 } },
@@ -97,8 +126,30 @@ export function seedOrders(now: number): Order[] {
   });
 }
 
-/** Earlier sales today that are not in the order list (shop counter). */
-export const EARLIER_POS_TODAY = 6420;
+export type PosSale = {
+  id: string;
+  at: number;
+  items: Item[];
+  subtotal: number;
+  discount: number;
+  total: number;
+  payment: Payment;
+  customer: string;
+};
+
+/** Counter sales from earlier today, so the drawer and profit are itemised. */
+export function seedSales(now: number): PosSale[] {
+  const drafts: { id: string; ago: number; items: Item[]; payment: Payment; customer: string; discount: number }[] = [
+    { id: "S-18420", ago: 95, items: [{ productId: "p8", size: "M", qty: 2 }], payment: "Cash", customer: "Walk-in", discount: 0 },
+    { id: "S-18402", ago: 150, items: [{ productId: "p5", size: "Free", qty: 2 }, { productId: "p1", size: "L", qty: 1 }], payment: "bKash", customer: "Walk-in", discount: 50 },
+    { id: "S-18311", ago: 210, items: [{ productId: "p4", size: "Free", qty: 1 }], payment: "Cash", customer: "Ripa", discount: 0 },
+  ];
+  return drafts.map(({ ago, discount, items, ...rest }) => {
+    const subtotal = itemsTotal(items, PRODUCTS);
+    const off = Math.min(Math.max(0, discount), subtotal);
+    return { ...rest, items, subtotal, discount: off, total: subtotal - off, at: now - ago * 60_000 };
+  });
+}
 
 // An incoming order used by the "New order arrives" demo button.
 export const INCOMING: Omit<Order, "id" | "createdAt" | "history" | "status"> [] = [
@@ -115,6 +166,9 @@ export const productById = (id: string) => PRODUCTS.find((p) => p.id === id)!;
 
 export const itemsTotal = (items: Item[], products: Product[]) =>
   items.reduce((sum, it) => sum + (products.find((p) => p.id === it.productId)?.price ?? 0) * it.qty, 0);
+
+export const itemsCost = (items: Item[], products: Product[]) =>
+  items.reduce((sum, it) => sum + (products.find((p) => p.id === it.productId)?.cost ?? 0) * it.qty, 0);
 
 export const orderTotal = (o: Order, products: Product[]) => itemsTotal(o.items, products) + o.delivery;
 
@@ -142,3 +196,39 @@ export const STATUS_STYLE: Record<Status, string> = {
 
 /** Total sales of the 6 days before today (oldest first), for the weekly chart. */
 export const PAST_WEEK = [14250, 18900, 11600, 22400, 16850, 19300];
+
+export type CustomerRow = {
+  phone: string;
+  name: string;
+  address: string;
+  orders: Order[];
+  /** Product + delivery on orders that were not returned. */
+  spent: number;
+  returns: number;
+  prior?: { orders: number; returned: number };
+};
+
+export function customerRows(orders: Order[], products: Product[]): CustomerRow[] {
+  const map = new Map<string, CustomerRow>();
+  const chronological = [...orders].sort((a, b) => a.createdAt - b.createdAt);
+  for (const o of chronological) {
+    let row = map.get(o.phone);
+    if (!row) {
+      row = { phone: o.phone, name: o.customer, address: o.address, orders: [], spent: 0, returns: 0, prior: CUSTOMER_HISTORY[o.phone] };
+      map.set(o.phone, row);
+    }
+    row.name = o.customer;
+    row.address = o.address;
+    row.orders.push(o);
+    if (o.status === "Returned") row.returns += 1;
+    else row.spent += orderTotal(o, products);
+  }
+  return [...map.values()]
+    .map((r) => ({ ...r, orders: [...r.orders].reverse() }))
+    .sort((a, b) => b.orders[0].createdAt - a.orders[0].createdAt);
+}
+
+/** True when this number has a habit of sending parcels back. */
+export function isRisky(phone: string, returnsInPanel = 0) {
+  return (CUSTOMER_HISTORY[phone]?.returned ?? 0) >= 2 || returnsInPanel >= 2;
+}
